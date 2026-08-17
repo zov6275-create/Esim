@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python311"]
+
+[phases.install]
+cmds = ["pip install aiogram==3.7.0"]
+
+[start]
+cmd = "python bot.py"
