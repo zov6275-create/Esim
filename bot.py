@@ -12,8 +12,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-BOT_TOKEN = os.getenv("8832756275:AAGm3td1R38mTx0ak8L_WQAuMI__wPP89Mg")
-ADMIN_ID = int(os.getenv("8826396052"))
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+_admin_id = os.getenv("ADMIN_ID")
+if not _admin_id:
+    raise RuntimeError("ADMIN_ID environment variable is not set!")
+ADMIN_ID = int(_admin_id)
 
 # ─── БАЗА ДАННЫХ ─────────────────────────────────────────
 
@@ -588,3 +591,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
