@@ -26,6 +26,8 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 DEFAULT_DATA = {
+    "banner_id": None,
+    "welcome_text": "👋 Добро пожаловать в сервис приёмки eSIM!",
     "operators": {
         "7Телеком":   {"bh": 13, "hold": 16},
         "Билайн":     {"bh": 18, "hold": 21},
@@ -87,6 +89,16 @@ class AdminBonus(StatesGroup):
 class AdminNumbers(StatesGroup):
     enter_user_id = State()
 
+class AdminBanner(StatesGroup):
+    waiting_photo = State()
+
+class AdminWelcome(StatesGroup):
+    waiting_text = State()
+
+class AdminBroadcast(StatesGroup):
+    waiting_content = State()
+    confirm = State()
+
 
 # ─── КЛАВИАТУРА ГЛАВНОГО МЕНЮ ────────────────────────────
 
@@ -118,8 +130,10 @@ async def cmd_start(message: Message, state: FSMContext):
     for name, prices in operators.items():
         lines.append(f"• {name} — БХ: {prices['bh']}$ / ХОЛД: {prices['hold']}$")
 
+    welcome_text = data.get("welcome_text", "👋 Добро пожаловать в сервис приёмки eSIM!")
+
     text = (
-        "👋 Добро пожаловать в сервис приёмки eSIM!\n\n"
+        f"{welcome_text}\n\n"
         "📋 <b>Актуальные цены:</b>\n"
         + "\n".join(lines) +
         "\n\n"
@@ -127,7 +141,16 @@ async def cmd_start(message: Message, state: FSMContext):
         "⏳ <b>ХОЛД</b> — холд 30 минут, цена выше"
     )
 
-    await message.answer(text, reply_markup=main_kb(), parse_mode="HTML")
+    banner_id = data.get("banner_id")
+    if banner_id:
+        await message.answer_photo(
+            photo=banner_id,
+            caption=text,
+            reply_markup=main_kb(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(text, reply_markup=main_kb(), parse_mode="HTML")
 
 
 # ─── ПРОФИЛЬ ─────────────────────────────────────────────
@@ -400,6 +423,9 @@ async def admin_panel(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="💰 Изменить цены", callback_data="admin:prices")],
         [InlineKeyboardButton(text="🎁 Добавить бонус клиенту", callback_data="admin:bonus")],
         [InlineKeyboardButton(text="📱 Номера клиента", callback_data="admin:numbers")],
+        [InlineKeyboardButton(text="🖼 Изменить баннер", callback_data="admin:banner")],
+        [InlineKeyboardButton(text="✏️ Изменить приветствие", callback_data="admin:welcome")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin:broadcast")],
     ])
     await message.answer("⚙️ <b>Панель администратора</b>", reply_markup=kb, parse_mode="HTML")
 
@@ -584,6 +610,161 @@ async def admin_numbers_show(message: Message, state: FSMContext):
     await state.clear()
 
 
+
+# ─── АДМИН: БАННЕР ───────────────────────────────────────
+
+@dp.callback_query(F.data == "admin:banner")
+async def admin_banner_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await callback.message.edit_text(
+        "🖼 Отправьте новое фото для баннера главного экрана.\n"
+        "Для удаления баннера отправьте: <b>убрать</b>",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminBanner.waiting_photo)
+
+@dp.message(AdminBanner.waiting_photo, F.photo)
+async def admin_banner_photo(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    data = load_data()
+    data["banner_id"] = message.photo[-1].file_id
+    save_data(data)
+    await message.answer("✅ Баннер обновлён.")
+    await state.clear()
+
+@dp.message(AdminBanner.waiting_photo, F.text)
+async def admin_banner_remove(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if message.text.strip().lower() == "убрать":
+        data = load_data()
+        data["banner_id"] = None
+        save_data(data)
+        await message.answer("✅ Баннер удалён.")
+    else:
+        await message.answer("📸 Отправьте фото или напишите <b>убрать</b>.", parse_mode="HTML")
+    await state.clear()
+
+
+# ─── АДМИН: ПРИВЕТСТВЕННЫЙ ТЕКСТ ─────────────────────────
+
+@dp.callback_query(F.data == "admin:welcome")
+async def admin_welcome_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    data = load_data()
+    current = data.get("welcome_text", "—")
+    await callback.message.edit_text(
+        f"✏️ Текущее приветствие:\n<i>{current}</i>\n\nОтправьте новый текст:",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminWelcome.waiting_text)
+
+@dp.message(AdminWelcome.waiting_text, F.text)
+async def admin_welcome_save(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    data = load_data()
+    data["welcome_text"] = message.text.strip()
+    save_data(data)
+    await message.answer("✅ Приветствие обновлено.")
+    await state.clear()
+
+
+# ─── АДМИН: РАССЫЛКА ─────────────────────────────────────
+
+@dp.callback_query(F.data == "admin:broadcast")
+async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await callback.message.edit_text(
+        "📢 Отправьте сообщение для рассылки (текст, фото или фото с подписью).\n\n"
+        "Оно будет отправлено всем пользователям бота."
+    )
+    await state.set_state(AdminBroadcast.waiting_content)
+
+@dp.message(AdminBroadcast.waiting_content)
+async def admin_broadcast_preview(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    if message.photo:
+        await state.update_data(
+            msg_type="photo",
+            photo_id=message.photo[-1].file_id,
+            caption=message.caption or ""
+        )
+    elif message.text:
+        await state.update_data(
+            msg_type="text",
+            text=message.text
+        )
+    else:
+        await message.answer("⚠️ Поддерживаются только текст или фото.")
+        return
+
+    data = load_data()
+    total = len(data["users"])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Отправить", callback_data="broadcast:confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast:cancel"),
+        ]
+    ])
+    await message.answer(
+        f"📢 Предпросмотр выше.\nПолучателей: <b>{total}</b>\n\nОтправить рассылку?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminBroadcast.confirm)
+
+@dp.callback_query(AdminBroadcast.confirm, F.data == "broadcast:confirm")
+async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+
+    state_data = await state.get_data()
+    data = load_data()
+    user_ids = list(data["users"].keys())
+
+    await callback.message.edit_text(f"⏳ Рассылка начата... ({len(user_ids)} чел.)")
+
+    ok, fail = 0, 0
+    for uid in user_ids:
+        try:
+            if state_data["msg_type"] == "photo":
+                await bot.send_photo(
+                    chat_id=int(uid),
+                    photo=state_data["photo_id"],
+                    caption=state_data.get("caption", ""),
+                    parse_mode="HTML"
+                )
+            else:
+                await bot.send_message(
+                    chat_id=int(uid),
+                    text=state_data["text"],
+                    parse_mode="HTML"
+                )
+            ok += 1
+        except Exception:
+            fail += 1
+
+    await callback.message.edit_text(
+        f"✅ Рассылка завершена.\n"
+        f"📨 Доставлено: <b>{ok}</b>\n"
+        f"❌ Не доставлено: <b>{fail}</b>",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+@dp.callback_query(AdminBroadcast.confirm, F.data == "broadcast:cancel")
+async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("❌ Рассылка отменена.")
+    await state.clear()
+
 # ─── ЗАПУСК ───────────────────────────────────────────────
 
 async def main():
@@ -591,4 +772,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
